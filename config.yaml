@@ -18,7 +18,7 @@ paths:
 model:
   name: "Qwen/Qwen3-VL-8B-Instruct"
   torch_dtype: "bfloat16"
-  attn_implementation: "flash_attention_2"
+  attn_implementation: "sdpa"  # Built into PyTorch 2.x, no extra install needed
   trust_remote_code: true
   device_map: "auto"
   use_cache: false  # Disabled for training (gradient checkpointing)
