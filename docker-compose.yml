@@ -1,0 +1,37 @@
+# ============================================================
+# Medical VQA System - Docker Compose
+# GPU-enabled deployment configuration
+# ============================================================
+
+services:
+  medical-vqa-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: medical-vqa-api
+    ports:
+      - "8000:8000"
+    environment:
+      - VQA_CONFIG=/app/medical_vqa/config.yaml
+      - VQA_ADAPTER_PATH=/app/outputs/final_model
+      - TRANSFORMERS_CACHE=/app/cache
+      - HF_HOME=/app/cache
+      - NVIDIA_VISIBLE_DEVICES=all
+    volumes:
+      - ./data:/app/data
+      - ./outputs:/app/outputs
+      - ./cache:/app/cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 300s

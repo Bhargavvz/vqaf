@@ -1,0 +1,161 @@
+# ============================================================
+# Medical VQA System - Master Configuration
+# Knowledge-Guided Explainable Vision-Language Transformer
+# ============================================================
+
+# --- Project Paths ---
+paths:
+  root: "./medical_vqa"
+  data_dir: "./data"
+  cache_dir: "./cache"
+  output_dir: "./outputs"
+  checkpoint_dir: "./outputs/checkpoints"
+  logs_dir: "./outputs/logs"
+  knowledge_index_dir: "./outputs/knowledge_index"
+  heatmap_dir: "./outputs/heatmaps"
+
+# --- Model Configuration ---
+model:
+  name: "Qwen/Qwen3-VL-8B"
+  torch_dtype: "bfloat16"
+  attn_implementation: "flash_attention_2"
+  trust_remote_code: true
+  device_map: "auto"
+  use_cache: false  # Disabled for training (gradient checkpointing)
+
+# --- Quantization (QLoRA) ---
+quantization:
+  enabled: true
+  bits: 4
+  quant_type: "nf4"
+  compute_dtype: "bfloat16"
+  use_double_quant: true
+
+# --- LoRA Configuration ---
+lora:
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+  bias: "none"
+  task_type: "CAUSAL_LM"
+
+# --- Dataset Configuration ---
+dataset:
+  vqa_rad:
+    enabled: true
+    data_path: "./data/vqa_rad"
+  path_vqa:
+    enabled: true
+    hf_name: "flaviagiammarino/path-vqa"
+  split_ratios:
+    train: 0.8
+    val: 0.1
+    test: 0.1
+  seed: 42
+  max_seq_length: 512
+  image_size: 448
+
+# --- Data Augmentation ---
+augmentation:
+  enabled: true
+  random_rotation: 15
+  brightness_range: [0.8, 1.2]
+  contrast_range: [0.8, 1.2]
+  horizontal_flip_prob: 0.3
+  gaussian_noise_std: 0.02
+  paraphrase_questions: true
+
+# --- Knowledge/RAG Configuration ---
+knowledge:
+  embedding_model: "sentence-transformers/all-MiniLM-L6-v2"
+  index_type: "IndexFlatIP"  # Cosine similarity via inner product
+  top_k: 3
+  max_knowledge_tokens: 200
+  rebuild_index: false
+
+# --- Training Configuration ---
+training:
+  num_epochs: 5
+  per_device_train_batch_size: 4
+  per_device_eval_batch_size: 8
+  gradient_accumulation_steps: 8  # Effective batch size = 32
+  learning_rate: 1.0e-4
+  weight_decay: 0.01
+  warmup_ratio: 0.05
+  lr_scheduler_type: "cosine"
+  max_grad_norm: 1.0
+  fp16: false
+  bf16: true
+  gradient_checkpointing: true
+  dataloader_num_workers: 4
+  save_strategy: "steps"
+  save_steps: 200
+  eval_strategy: "steps"
+  eval_steps: 200
+  save_total_limit: 3
+  load_best_model_at_end: true
+  metric_for_best_model: "accuracy"
+  greater_is_better: true
+  logging_steps: 50
+  report_to: "tensorboard"
+  remove_unused_columns: false
+  max_training_hours: 7
+
+# --- Loss Configuration ---
+loss:
+  answer_weight: 0.7
+  explanation_weight: 0.3
+
+# --- Curriculum Learning ---
+curriculum:
+  enabled: true
+  stages:
+    - name: "easy"
+      question_types: ["yes/no", "binary"]
+      epochs: 1
+    - name: "medium"
+      question_types: ["counting", "color", "location"]
+      epochs: 2
+    - name: "hard"
+      question_types: ["descriptive", "reasoning", "comparison"]
+      epochs: 2
+
+# --- Explainability ---
+explainability:
+  gradcam:
+    enabled: true
+    target_layer: "visual"  # Last visual encoder layer
+  attention_maps:
+    enabled: true
+    num_heads_to_visualize: 4
+  text_explanation:
+    enabled: true
+    max_explanation_length: 200
+
+# --- Evaluation ---
+evaluation:
+  metrics:
+    - "accuracy"
+    - "bleu"
+    - "rouge"
+  fuzzy_match_threshold: 0.85
+  clinical_consistency: true
+
+# --- API Configuration ---
+api:
+  host: "0.0.0.0"
+  port: 8000
+  max_image_size_mb: 20
+  cors_origins: ["*"]
+  model_load_timeout: 300
+
+# --- Logging ---
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "./outputs/logs/training.log"
