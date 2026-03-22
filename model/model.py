@@ -96,7 +96,7 @@ class MedicalVQAModel:
         
         # --- Load Model ---
         model_kwargs = {
-            "torch_dtype": torch_dtype,
+            "dtype": torch_dtype,
             "device_map": self.model_config.get("device_map", "auto"),
             "trust_remote_code": self.model_config.get("trust_remote_code", True),
             "use_cache": False if for_training else True,
