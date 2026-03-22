@@ -145,7 +145,6 @@ def download_path_vqa(output_dir: str):
         dataset = load_dataset(
             "flaviagiammarino/path-vqa",
             cache_dir=str(cache_dir),
-            trust_remote_code=True
         )
         
         logger.info(f"PathVQA downloaded successfully!")
