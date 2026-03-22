@@ -99,7 +99,6 @@ class MedicalVQAModel:
             "dtype": torch_dtype,
             "device_map": self.model_config.get("device_map", "auto"),
             "trust_remote_code": self.model_config.get("trust_remote_code", True),
-            "use_cache": False if for_training else True,
         }
         
         # Add attention implementation
@@ -115,6 +114,10 @@ class MedicalVQAModel:
             self.model_name,
             **model_kwargs
         )
+        
+        # Disable cache for training (required for gradient checkpointing)
+        if for_training and hasattr(self.model.config, "use_cache"):
+            self.model.config.use_cache = False
         
         logger.info(f"Model loaded. Parameters: {self.model.num_parameters():,}")
         
