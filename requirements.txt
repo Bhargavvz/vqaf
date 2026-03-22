@@ -12,7 +12,9 @@ opencv-python>=4.8.0
 qwen-vl-utils>=0.0.8
 
 # Knowledge/RAG
-faiss-gpu>=1.7.4
+# faiss-cpu works for our knowledge base size (~50 entries)
+# For GPU FAISS on large indices: conda install -c pytorch faiss-gpu
+faiss-cpu>=1.7.4
 sentence-transformers>=2.7.0
 
 # Data
