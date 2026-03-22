@@ -296,7 +296,7 @@ def _error_analysis(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate Medical VQA Model")
     parser.add_argument(
-        "--config", type=str, default="medical_vqa/config.yaml",
+        "--config", type=str, default="config.yaml",
         help="Path to configuration file"
     )
     parser.add_argument(

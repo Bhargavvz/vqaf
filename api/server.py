@@ -45,7 +45,7 @@ _config = None
 
 def _load_config() -> dict:
     """Load configuration from YAML."""
-    config_path = os.environ.get("VQA_CONFIG", "medical_vqa/config.yaml")
+    config_path = os.environ.get("VQA_CONFIG", "config.yaml")
     if os.path.exists(config_path):
         with open(config_path, 'r') as f:
             return yaml.safe_load(f)
