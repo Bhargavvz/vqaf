@@ -197,13 +197,15 @@ class MedicalVQAProcessor:
                 collated[key] = tensors
                 continue
             
-            # Handle pixel_values and image_grid_thw specially
-            # These are multi-dimensional and can't be simply padded
+            # Handle pixel_values specially — concatenate patches
             if key in ("pixel_values", "pixel_values_videos"):
-                # Concatenate along the first dimension
                 collated[key] = torch.cat(tensors, dim=0)
             elif key == "image_grid_thw":
-                collated[key] = torch.cat(tensors, dim=0)
+                # Each sample is shape (3,), stack to get (N, 3)
+                if tensors[0].dim() == 1:
+                    collated[key] = torch.stack(tensors, dim=0)
+                else:
+                    collated[key] = torch.cat(tensors, dim=0)
             elif tensors[0].dim() == 0:
                 # Scalar tensors
                 collated[key] = torch.stack(tensors)
