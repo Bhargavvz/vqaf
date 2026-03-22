@@ -126,14 +126,23 @@ def download_vqa_rad(output_dir: str):
 
 def download_path_vqa(output_dir: str):
     """
-    Download PathVQA dataset using HuggingFace datasets.
+    Download PathVQA dataset and save as JSON + images to disk.
+    
+    Saves in the same format as VQA-RAD for consistent loading.
     
     Args:
-        output_dir: Directory for caching.
+        output_dir: Directory to save the dataset.
     """
     logger.info("=" * 60)
     logger.info("PathVQA Dataset Download (via HuggingFace)")
     logger.info("=" * 60)
+    
+    path_vqa_dir = Path(output_dir) / "path_vqa"
+    
+    # Check if already saved
+    if (path_vqa_dir / "train.json").exists():
+        logger.info(f"PathVQA already saved at {path_vqa_dir}")
+        return
     
     try:
         from datasets import load_dataset
@@ -147,9 +156,45 @@ def download_path_vqa(output_dir: str):
             cache_dir=str(cache_dir),
         )
         
-        logger.info(f"PathVQA downloaded successfully!")
-        for split_name, split_data in dataset.items():
-            logger.info(f"  {split_name}: {len(split_data)} samples")
+        logger.info("PathVQA downloaded successfully!")
+        
+        # Save each split as JSON + images
+        split_map = {"train": "train", "validation": "val", "test": "test"}
+        
+        for hf_split, our_split in split_map.items():
+            if hf_split not in dataset:
+                continue
+            
+            split_data = dataset[hf_split]
+            images_dir = path_vqa_dir / our_split / "images"
+            images_dir.mkdir(parents=True, exist_ok=True)
+            
+            samples = []
+            for i, item in enumerate(split_data):
+                # Save image
+                image = item["image"]
+                if hasattr(image, "convert"):
+                    image = image.convert("RGB")
+                img_filename = f"pathvqa_{i:05d}.jpg"
+                image.save(str(images_dir / img_filename))
+                
+                answer = str(item.get("answer", ""))
+                samples.append({
+                    "image_name": img_filename,
+                    "question": str(item.get("question", "")),
+                    "answer": answer,
+                    "answer_type": "closed" if answer.lower() in ["yes", "no"] else "open",
+                    "question_type": "pathology",
+                })
+            
+            # Save JSON
+            json_file = path_vqa_dir / f"{our_split}.json"
+            with open(json_file, 'w') as f:
+                json.dump(samples, f, indent=2)
+            
+            logger.info(f"  {our_split}: saved {len(samples)} samples to {path_vqa_dir / our_split}")
+        
+        logger.info(f"PathVQA saved to disk: {path_vqa_dir}")
         
     except ImportError:
         logger.error("'datasets' library not installed. Run: pip install datasets")

@@ -242,12 +242,23 @@ class PathVQADataset(Dataset):
     """
     Dataset class for PathVQA (Pathology Visual Question Answering).
     
-    PathVQA contains pathology images with question-answer pairs.
-    Loaded from HuggingFace datasets hub.
+    Loads from saved JSON + images on disk (created by download_datasets.py).
+    Falls back to HuggingFace if local files not found.
+    
+    Expected data structure:
+        data_path/
+            train/
+                images/
+                    pathvqa_00000.jpg
+                    ...
+            train.json
+            val.json
+            test.json
     """
     
     def __init__(
         self,
+        data_path: str = "./data/path_vqa",
         hf_name: str = "flaviagiammarino/path-vqa",
         split: str = "train",
         transform=None,
@@ -256,12 +267,14 @@ class PathVQADataset(Dataset):
     ):
         """
         Args:
-            hf_name: HuggingFace dataset identifier.
+            data_path: Path to saved PathVQA data directory.
+            hf_name: HuggingFace dataset identifier (fallback).
             split: One of 'train', 'val', 'test'.
             transform: Optional image transform/augmentation.
             normalize_answers: Whether to normalize answer strings.
-            cache_dir: Optional cache directory for downloads.
+            cache_dir: Optional cache directory for HF downloads.
         """
+        self.data_path = Path(data_path)
         self.hf_name = hf_name
         self.split = split
         self.transform = transform
@@ -272,41 +285,47 @@ class PathVQADataset(Dataset):
         logger.info(f"PathVQA [{split}]: Loaded {len(self.samples)} samples")
     
     def _load_data(self, cache_dir: Optional[str]):
-        """Load PathVQA from HuggingFace datasets."""
-        try:
-            from datasets import load_dataset
+        """Load PathVQA from saved JSON files on disk."""
+        # Try loading from local JSON files first
+        json_file = self.data_path / f"{self.split}.json"
+        
+        if json_file.exists():
+            self._load_from_disk(json_file)
+            return
+        
+        # Fallback: try HuggingFace
+        logger.warning(f"PathVQA JSON not found at {json_file}. Run download_datasets.py first.")
+        logger.warning("PathVQA will be empty.")
+    
+    def _load_from_disk(self, json_file: Path):
+        """Load PathVQA from saved JSON + images."""
+        with open(json_file, 'r', encoding='utf-8') as f:
+            raw_data = json.load(f)
+        
+        images_dir = self.data_path / self.split / "images"
+        
+        for item in raw_data:
+            image_name = item.get("image_name", "")
+            question = item.get("question", "")
+            answer = item.get("answer", "")
             
-            # Map our split names to HF split names
-            hf_split_map = {"train": "train", "val": "validation", "test": "test"}
-            hf_split = hf_split_map.get(self.split, self.split)
+            if not question:
+                continue
             
-            dataset = load_dataset(
-                self.hf_name,
-                split=hf_split,
-                cache_dir=cache_dir,
-            )
+            image_path = images_dir / image_name
             
-            for item in dataset:
-                answer = str(item.get("answer", ""))
-                question = str(item.get("question", ""))
-                
-                processed_answer = normalize_answer(answer) if self.normalize_answers else answer
-                
-                self.samples.append({
-                    "image": item["image"].convert("RGB") if hasattr(item["image"], "convert") else item["image"],
-                    "image_path": "",  # HF datasets provide PIL images directly
-                    "question": question,
-                    "answer": processed_answer,
-                    "raw_answer": answer,
-                    "difficulty": classify_question_difficulty(question),
-                    "answer_type": "open" if len(answer.split()) > 2 else "closed",
-                    "question_type": "pathology",
-                    "source": "path_vqa"
-                })
-                
-        except Exception as e:
-            logger.error(f"Failed to load PathVQA from HuggingFace: {e}")
-            logger.warning("PathVQA will be empty. Check internet connection and datasets library.")
+            processed_answer = normalize_answer(answer) if self.normalize_answers else answer
+            
+            self.samples.append({
+                "image_path": str(image_path),
+                "question": question,
+                "answer": processed_answer,
+                "raw_answer": answer,
+                "difficulty": classify_question_difficulty(question),
+                "answer_type": item.get("answer_type", "open"),
+                "question_type": item.get("question_type", "pathology"),
+                "source": "path_vqa"
+            })
     
     def __len__(self) -> int:
         return len(self.samples)
@@ -314,15 +333,14 @@ class PathVQADataset(Dataset):
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         sample = self.samples[idx].copy()
         
-        # If image is stored as path, load it
-        if isinstance(sample.get("image"), str) or not sample.get("image"):
-            try:
-                image = Image.open(sample["image_path"]).convert("RGB")
-            except Exception:
-                image = Image.new("RGB", (448, 448), (0, 0, 0))
-            sample["image"] = image
+        # Load image
+        try:
+            image = Image.open(sample["image_path"]).convert("RGB")
+        except Exception:
+            image = Image.new("RGB", (448, 448), (0, 0, 0))
+        sample["image"] = image
         
-        # Apply transform if provided
+        # Apply transform
         if self.transform and isinstance(sample["image"], Image.Image):
             sample["image"] = self.transform(sample["image"])
         
@@ -372,6 +390,7 @@ class CombinedMedicalVQADataset(Dataset):
         # Load PathVQA
         if config.get("path_vqa", {}).get("enabled", True):
             path_vqa = PathVQADataset(
+                data_path=config["path_vqa"].get("data_path", "./data/path_vqa"),
                 hf_name=config["path_vqa"].get("hf_name", "flaviagiammarino/path-vqa"),
                 split=split,
                 transform=None,

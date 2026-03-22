@@ -51,13 +51,14 @@ dataset:
     data_path: "./data/vqa_rad"
   path_vqa:
     enabled: true
+    data_path: "./data/path_vqa"
     hf_name: "flaviagiammarino/path-vqa"
   split_ratios:
     train: 0.8
     val: 0.1
     test: 0.1
   seed: 42
-  max_seq_length: 512
+  max_seq_length: 2048
   image_size: 448
 
 # --- Data Augmentation ---
