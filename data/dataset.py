@@ -284,7 +284,6 @@ class PathVQADataset(Dataset):
                 self.hf_name,
                 split=hf_split,
                 cache_dir=cache_dir,
-                trust_remote_code=True
             )
             
             for item in dataset:

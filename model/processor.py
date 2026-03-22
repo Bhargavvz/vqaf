@@ -25,7 +25,7 @@ class MedicalVQAProcessor:
         - Batch collation for training
     """
     
-    def __init__(self, processor, max_seq_length: int = 512):
+    def __init__(self, processor, max_seq_length: int = 2048):
         """
         Args:
             processor: HuggingFace AutoProcessor (Qwen VL processor).
@@ -65,16 +65,22 @@ class MedicalVQAProcessor:
                 "precise answer followed by a brief medical explanation."
             )
         
-        # Handle image
+        # Handle image — resize to limit token count
         if isinstance(image, str):
-            image_source = f"file://{image}" if not image.startswith("file://") else image
+            pil_image = Image.open(image).convert("RGB")
         elif isinstance(image, Image.Image):
-            import tempfile
-            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-                image.save(tmp.name)
-                image_source = f"file://{tmp.name}"
+            pil_image = image.convert("RGB")
         else:
             raise ValueError(f"Unsupported image type: {type(image)}")
+        
+        # Resize to a consistent resolution to avoid variable token lengths
+        pil_image = pil_image.resize((448, 448), Image.BILINEAR)
+        
+        # Save to temp file for qwen_vl_utils
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            pil_image.save(tmp.name)
+            image_source = f"file://{tmp.name}"
         
         # Build prompt text
         prompt_parts = [f"Question: {question}"]
@@ -113,27 +119,36 @@ class MedicalVQAProcessor:
         # Process vision info
         image_inputs, video_inputs = process_vision_info(messages)
         
-        # Tokenize
+        # Tokenize — NO truncation to avoid image token mismatch
         inputs = self.processor(
             text=[text],
             images=image_inputs,
             videos=video_inputs,
-            padding="max_length",
-            truncation=True,
-            max_length=self.max_seq_length,
+            padding=False,
             return_tensors="pt"
         )
         
         # Squeeze batch dimension for single sample
         result = {k: v.squeeze(0) for k, v in inputs.items()}
         
+        # If sequence is too long, truncate text tokens only (keep image tokens)
+        if result["input_ids"].shape[0] > self.max_seq_length:
+            result["input_ids"] = result["input_ids"][:self.max_seq_length]
+            if "attention_mask" in result:
+                result["attention_mask"] = result["attention_mask"][:self.max_seq_length]
+        
         # Create labels for training (mask input tokens, only compute loss on output)
         if answer is not None:
             labels = result["input_ids"].clone()
             # Mask all non-answer tokens with -100
-            # Find where the assistant response starts
             labels = self._mask_non_answer_tokens(labels, text, answer)
             result["labels"] = labels
+        
+        # Clean up temp file
+        try:
+            os.unlink(tmp.name)
+        except Exception:
+            pass
         
         return result
     
@@ -146,18 +161,7 @@ class MedicalVQAProcessor:
         """
         Mask non-answer tokens in labels with -100 for loss computation.
         Only the answer part should contribute to the loss.
-        
-        Args:
-            labels: Token IDs tensor.
-            full_text: Full prompt + answer text.
-            answer: The answer portion only.
-        
-        Returns:
-            Labels tensor with non-answer positions set to -100.
         """
-        # Find the answer start position in the tokenized sequence
-        # Use a heuristic: mask everything up to the last occurrence 
-        # of the assistant role marker
         tokenizer = self.processor.tokenizer if hasattr(self.processor, 'tokenizer') else self.processor
         
         # Encode just the answer to find its length
@@ -166,7 +170,6 @@ class MedicalVQAProcessor:
         
         # Mask everything except the last answer_len tokens (+ some margin)
         if answer_len > 0 and answer_len < len(labels):
-            # Set all tokens before the answer to -100
             mask_end = len(labels) - answer_len - 1  # -1 for EOS
             labels[:mask_end] = -100
         
@@ -181,36 +184,47 @@ class MedicalVQAProcessor:
         """
         Collate function for DataLoader.
         
-        Args:
-            batch: List of processed sample dictionaries.
-        
-        Returns:
-            Batched tensor dictionary.
+        Handles variable-length sequences AND variable-size pixel_values.
         """
         collated = {}
         
-        for key in batch[0].keys():
+        all_keys = batch[0].keys()
+        
+        for key in all_keys:
             tensors = [sample[key] for sample in batch]
             
-            if isinstance(tensors[0], torch.Tensor):
-                # Pad to max length in batch
-                max_len = max(t.shape[0] for t in tensors if t.dim() > 0)
+            if not isinstance(tensors[0], torch.Tensor):
+                collated[key] = tensors
+                continue
+            
+            # Handle pixel_values and image_grid_thw specially
+            # These are multi-dimensional and can't be simply padded
+            if key in ("pixel_values", "pixel_values_videos"):
+                # Concatenate along the first dimension
+                collated[key] = torch.cat(tensors, dim=0)
+            elif key == "image_grid_thw":
+                collated[key] = torch.cat(tensors, dim=0)
+            elif tensors[0].dim() == 0:
+                # Scalar tensors
+                collated[key] = torch.stack(tensors)
+            else:
+                # 1D tensors (input_ids, attention_mask, labels) — pad to max length
+                max_len = max(t.shape[0] for t in tensors)
+                
+                if key == "labels":
+                    pad_value = -100
+                elif key == "attention_mask":
+                    pad_value = 0
+                else:
+                    pad_value = 0
                 
                 padded = []
                 for t in tensors:
-                    if t.dim() > 0 and t.shape[0] < max_len:
+                    if t.shape[0] < max_len:
                         pad_size = max_len - t.shape[0]
-                        if key == "labels":
-                            pad_value = -100
-                        elif key == "attention_mask":
-                            pad_value = 0
-                        else:
-                            pad_value = 0
                         t = torch.nn.functional.pad(t, (0, pad_size), value=pad_value)
                     padded.append(t)
                 
                 collated[key] = torch.stack(padded)
-            else:
-                collated[key] = tensors
         
         return collated
