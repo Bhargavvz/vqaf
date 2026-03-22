@@ -52,64 +52,75 @@ def download_file(url: str, dest_path: str, desc: str = "Downloading") -> bool:
 
 def download_vqa_rad(output_dir: str):
     """
-    Download VQA-RAD dataset.
+    Download VQA-RAD dataset from HuggingFace.
     
-    The VQA-RAD dataset is available from the original authors.
-    This function attempts to download from known public mirrors.
+    Uses the flaviagiammarino/vqa-rad HuggingFace dataset which contains
+    radiology images with question-answer pairs (~3,515 QA pairs).
     
     Args:
         output_dir: Directory to save the dataset.
     """
-    vqa_rad_dir = Path(output_dir) / "vqa_rad"
-    vqa_rad_dir.mkdir(parents=True, exist_ok=True)
-    images_dir = vqa_rad_dir / "images"
-    images_dir.mkdir(exist_ok=True)
-    
     logger.info("=" * 60)
-    logger.info("VQA-RAD Dataset Download")
+    logger.info("VQA-RAD Dataset Download (via HuggingFace)")
     logger.info("=" * 60)
     
-    # VQA-RAD is typically distributed as a JSON + image folder
-    # Primary source: https://osf.io/89kps/ (Open Science Framework)
-    vqa_rad_urls = [
-        # OSF download link for VQA-RAD
-        "https://osf.io/89kps/download",
-    ]
-    
-    json_file = vqa_rad_dir / "VQA_RAD Dataset Public.json"
-    
-    if json_file.exists():
-        logger.info(f"VQA-RAD JSON already exists at {json_file}")
-    else:
-        logger.info(
-            "VQA-RAD requires manual download due to licensing.\n"
-            "Please follow these steps:\n"
-            "1. Visit: https://osf.io/89kps/\n"
-            "2. Download 'VQA_RAD Dataset Public.json'\n"
-            "3. Download the image folder\n"
-            f"4. Place files in: {vqa_rad_dir}\n"
-            "   - JSON file directly in the folder\n"
-            "   - Images in the 'images/' subfolder\n"
+    try:
+        from datasets import load_dataset
+        
+        cache_dir = Path(output_dir) / "vqa_rad_cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        
+        logger.info("Downloading VQA-RAD from HuggingFace Hub...")
+        dataset = load_dataset(
+            "flaviagiammarino/vqa-rad",
+            cache_dir=str(cache_dir),
         )
         
-        # Try automated download
-        for url in vqa_rad_urls:
-            zip_path = vqa_rad_dir / "vqa_rad.zip"
-            logger.info(f"Attempting download from {url}...")
-            if download_file(url, str(zip_path), "VQA-RAD"):
-                try:
-                    with zipfile.ZipFile(str(zip_path), 'r') as zf:
-                        zf.extractall(str(vqa_rad_dir))
-                    logger.info("VQA-RAD extracted successfully!")
-                    zip_path.unlink()  # Remove zip
-                    break
-                except zipfile.BadZipFile:
-                    logger.warning("Downloaded file is not a valid ZIP. Manual download required.")
-                    zip_path.unlink()
-    
-    # Create a sample/placeholder if download failed
-    if not json_file.exists():
+        logger.info("VQA-RAD downloaded successfully!")
+        for split_name, split_data in dataset.items():
+            logger.info(f"  {split_name}: {len(split_data)} samples")
+        
+        # Also save as JSON for our dataset loader
+        vqa_rad_dir = Path(output_dir) / "vqa_rad"
+        vqa_rad_dir.mkdir(parents=True, exist_ok=True)
+        images_dir = vqa_rad_dir / "images"
+        images_dir.mkdir(exist_ok=True)
+        
+        all_samples = []
+        img_idx = 0
+        for split_name, split_data in dataset.items():
+            for item in split_data:
+                # Save image to disk
+                image = item["image"]
+                if hasattr(image, "convert"):
+                    image = image.convert("RGB")
+                img_filename = f"vqarad_{img_idx:05d}.jpg"
+                image.save(str(images_dir / img_filename))
+                
+                all_samples.append({
+                    "image_name": img_filename,
+                    "question": item.get("question", ""),
+                    "answer": item.get("answer", ""),
+                    "answer_type": "CLOSED" if str(item.get("answer", "")).lower() in ["yes", "no"] else "OPEN",
+                    "question_type": "general",
+                })
+                img_idx += 1
+        
+        # Save JSON
+        json_file = vqa_rad_dir / "VQA_RAD Dataset Public.json"
+        with open(json_file, 'w') as f:
+            json.dump(all_samples, f, indent=2)
+        
+        logger.info(f"VQA-RAD saved: {len(all_samples)} samples, {img_idx} images to {vqa_rad_dir}")
+        
+    except ImportError:
+        logger.error("'datasets' library not installed. Run: pip install datasets")
+    except Exception as e:
+        logger.error(f"Failed to download VQA-RAD: {e}")
         logger.warning("Creating placeholder VQA-RAD data for development...")
+        vqa_rad_dir = Path(output_dir) / "vqa_rad"
+        vqa_rad_dir.mkdir(parents=True, exist_ok=True)
+        (vqa_rad_dir / "images").mkdir(exist_ok=True)
         _create_placeholder_vqa_rad(vqa_rad_dir)
 
 
